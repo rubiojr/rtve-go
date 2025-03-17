@@ -4,7 +4,7 @@ A command-line tool for downloading videos and subtitles from RTVE (Radio Televi
 
 ## Features
 
-- Scrape videos from RTVE program pages
+- Scrape videos from RTVE show pages
 - Download video metadata in JSON format
 - Download subtitles in VTT format
 - Organize videos by publication date
@@ -35,28 +35,30 @@ sudo mv rtve-scraper /usr/local/bin/
 ## Usage
 
 ```bash
-# Basic usage (uses default program telediario-1)
-./rtve-scraper
+./rtve-scraper fetch --show telediario-1
 
 # Specify output directory
-./rtve-scraper --output="/path/to/videos"
-
-# Use a custom program URL (must contain %d for page number)
-./rtve-scraper --program="https://www.rtve.es/play/videos/modulos/capitulos/12345/?page=%d"
-
-# Limit the number of pages to scrape
-./rtve-scraper --max-pages=10
+./rtve-scraper --output="/path/to/videos" --show telediario-1
 
 # Enable verbose output
-./rtve-scraper --verbose
+./rtve-scraper --verbose --show telediario-1
 ```
+
+## Supported Shows
+
+Currently supported shows include:
+- telediario-1
+- telediario-2
+- informe-semanal
+
+Use the `list-shows` command to see the complete list of available shows
 
 ### Command-line Options
 
 | Option | Alias | Default | Description |
 |--------|-------|---------|-------------|
 | `--output` | `-o` | `rtve-videos` | Output directory for downloaded content |
-| `--program` | `-p` | `telediario-1` | Program to scrap |
+| `--show` | `-p` | none | Show to scrap (required) |
 | `--max-pages` | `-m` | `1024` | Maximum number of pages to scrape |
 | `--verbose` | `-v` | `false` | Enable verbose output |
 
@@ -80,7 +82,7 @@ rtve-videos/
 
 ## How It Works
 
-1. The scraper navigates through pages of the specified RTVE program URL
+1. The scraper navigates through pages of the specified RTVE show URL
 2. For each page, it extracts links to individual videos
 3. For each video:
    - Metadata is downloaded and saved as JSON

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,7 +53,8 @@ func NewScrapper(program string, options ...Option) *Scrapper {
 	return s
 }
 
-var ErrPageNotFound = errors.New("error parsing page")
+var ErrPageNotFound = errors.New("page not found")
+var ErrForbidden = errors.New("access not allowed")
 
 func (s *Scrapper) get(url string) (string, error) {
 	// Create a new request
@@ -162,33 +164,44 @@ func main() {
 	app := &cli.App{
 		Name:  "rtve-scraper",
 		Usage: "Download videos and subtitles from RTVE",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "output",
-				Aliases: []string{"o"},
-				Value:   "rtve-videos",
-				Usage:   "Output directory for downloaded content",
+		Commands: []*cli.Command{
+			{
+				Name:   "fetch",
+				Usage:  "Download videos from RTVE",
+				Action: runScraper,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "output",
+						Aliases: []string{"o"},
+						Value:   "rtve-videos",
+						Usage:   "Output directory for downloaded content",
+					},
+					&cli.StringFlag{
+						Name:     "show",
+						Aliases:  []string{"p"},
+						Required: true,
+						Usage:    "Show to scrape",
+					},
+					&cli.IntFlag{
+						Name:    "max-pages",
+						Aliases: []string{"m"},
+						Value:   1,
+						Usage:   "Maximum number of pages to scrape",
+					},
+					&cli.BoolFlag{
+						Name:    "verbose",
+						Aliases: []string{"v"},
+						Value:   false,
+						Usage:   "Enable verbose output",
+					},
+				},
 			},
-			&cli.StringFlag{
-				Name:    "program",
-				Aliases: []string{"p"},
-				Value:   "telediario-1",
-				Usage:   "Program to scrape",
-			},
-			&cli.IntFlag{
-				Name:    "max-pages",
-				Aliases: []string{"m"},
-				Value:   1,
-				Usage:   "Maximum number of pages to scrape",
-			},
-			&cli.BoolFlag{
-				Name:    "verbose",
-				Aliases: []string{"v"},
-				Value:   false,
-				Usage:   "Enable verbose output",
+			{
+				Name:   "list-shows",
+				Usage:  "List available shows that can be downloaded",
+				Action: listShows,
 			},
 		},
-		Action: runScraper,
 	}
 
 	err := app.Run(os.Args)
@@ -199,7 +212,7 @@ func main() {
 
 func runScraper(c *cli.Context) error {
 	outputPath := c.String("output")
-	program := c.String("program")
+	show := c.String("show")
 	maxPages := c.Int("max-pages")
 	verbose := c.Bool("verbose")
 
@@ -210,18 +223,18 @@ func runScraper(c *cli.Context) error {
 
 	fmt.Printf("Starting RTVE scraper\n")
 	fmt.Printf("Output directory: %s\n", outputPath)
-	fmt.Printf("Program: %s\n", program)
+	fmt.Printf("Show: %s\n", show)
 	fmt.Printf("Max pages: %d\n", maxPages)
 
-	switch program {
+	switch show {
 	case "telediario-1", "telediario-2", "informe-semanal":
 	default:
-		return fmt.Errorf("unsupported program: %s", program)
+		return fmt.Errorf("unsupported show: %s", show)
 	}
 
 	// Create the scraper with the provided options
 	scraper := NewScrapper(
-		program,
+		show,
 		WithOutputPath(outputPath),
 	)
 
@@ -247,7 +260,7 @@ func (s *Scrapper) RunWithLimit(maxPages int, verbose bool) int {
 
 		links, err := s.scrape(page)
 		// We're done paginating, return
-		if errors.Is(err, ErrPageNotFound) {
+		if errors.Is(err, ErrPageNotFound) || errors.Is(err, ErrForbidden) {
 			break
 		}
 
@@ -307,4 +320,25 @@ func (s *Scrapper) RunWithLimit(maxPages int, verbose bool) int {
 	}
 
 	return videosDownloaded
+}
+
+func listShows(c *cli.Context) error {
+	fmt.Println("Available shows:")
+
+	// Get a sorted list of show names for consistent output
+	shows := make([]string, 0, len(urlMap))
+	for show := range urlMap {
+		shows = append(shows, show)
+	}
+	sort.Strings(shows)
+
+	// Print each show with its details
+	for _, show := range shows {
+		fmt.Printf("- %s (ID: %s)\n", show, urlMap[show].ID)
+	}
+
+	fmt.Println("\nUse the show name with the fetch command:")
+	fmt.Println("Example: rtve-scraper fetch --show telediario-1")
+
+	return nil
 }
