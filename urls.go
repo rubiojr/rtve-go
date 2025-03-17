@@ -16,9 +16,9 @@ var urlMap = map[string]struct {
 		Regex: `https://www\.rtve\.es/play/videos/telediario-1/.*/`,
 	},
 	"informe-semanal": {
-		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/1632/?page=%d",
+		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/1631/?page=%d",
 		ID:    "1631",
-		Regex: `https://www\.rtve\.es/play/videos/informe-semanal/.*/`,
+		Regex: `https://www\.rtve\.es/play/videos/informe\-semanal/.*/`,
 	},
 }
 
