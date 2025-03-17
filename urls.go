@@ -15,6 +15,11 @@ var urlMap = map[string]struct {
 		ID:    "45030",
 		Regex: `https://www\.rtve\.es/play/videos/telediario-1/.*/`,
 	},
+	"informe-semanal": {
+		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/1632/?page=%d",
+		ID:    "1631",
+		Regex: `https://www\.rtve\.es/play/videos/informe-semanal/.*/`,
+	},
 }
 
 const ApiURL = "https://api2.rtve.es/api/videos/%s.json"

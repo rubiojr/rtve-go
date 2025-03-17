@@ -214,10 +214,7 @@ func runScraper(c *cli.Context) error {
 	fmt.Printf("Max pages: %d\n", maxPages)
 
 	switch program {
-	case "telediario-1":
-		// Handle program1
-	case "telediario-2":
-		// Handle program2
+	case "telediario-1", "telediario-2", "informe-semanal":
 	default:
 		return fmt.Errorf("unsupported program: %s", program)
 	}
