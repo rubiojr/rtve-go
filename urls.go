@@ -1,0 +1,21 @@
+package main
+
+var urlMap = map[string]struct {
+	ID    string
+	URL   string
+	Regex string
+}{
+	"telediario-2": {
+		ID:    "135930",
+		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/135930/?page=%d",
+		Regex: `https://www\.rtve\.es/play/videos/telediario-2/.*/`,
+	},
+	"telediario-1": {
+		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/45030/?page=%d",
+		ID:    "45030",
+		Regex: `https://www\.rtve\.es/play/videos/telediario-1/.*/`,
+	},
+}
+
+const ApiURL = "https://api2.rtve.es/api/videos/%s.json"
+const SubsURL = "https://api2.rtve.es/api/videos/%s/subtitulos.json"
