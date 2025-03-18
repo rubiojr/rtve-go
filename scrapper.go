@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -80,12 +79,15 @@ func (s *Scrapper) get(url string) (string, error) {
 	return string(body), nil
 }
 
-func (s *Scrapper) scrape(page int) ([]*VideoInfo, error) {
+func (s *Scrapper) ScrapePage(page int) ([]*VideoInfo, error) {
 	content, err := s.get(fmt.Sprintf(urlMap[s.Program].URL, page))
 	if err != nil {
 		return nil, fmt.Errorf("error downloading HTML: %w", err)
 	}
+	return s.scrape(content)
+}
 
+func (s *Scrapper) scrape(content string) ([]*VideoInfo, error) {
 	pattern := regexp.MustCompile(urlMap[s.Program].Regex)
 
 	matches := pattern.FindAllString(content, -1)
@@ -148,68 +150,57 @@ func (s *Scrapper) updateFolderTime(meta *VideoMetadata, folder string) error {
 	return nil
 }
 
-func (s *Scrapper) RunWithLimit(maxPages int, verbose bool) int {
+func (s *Scrapper) Scrape(maxPages int) (int, []error) {
 	videosDownloaded := 0
+	errs := make([]error, 0)
 
 	for page := 0; page <= maxPages; page++ {
-		if verbose {
-			fmt.Printf("Scraping page %d...\n", page)
-		}
-
-		links, err := s.scrape(page)
-		// We're done paginating, return
+		links, err := s.ScrapePage(page)
 		if errors.Is(err, ErrPageNotFound) || errors.Is(err, ErrForbidden) {
 			break
 		}
 
 		if err != nil {
-			log.Printf("error finding links on page %d: %v", page, err)
+			errs = append(errs, fmt.Errorf("error finding links on page %d: %w", page, err))
 			continue
-		}
-
-		if verbose {
-			fmt.Printf("Found %d links on page %d\n", len(links), page)
 		}
 
 		for _, link := range links {
 			meta, err := s.DownloadVideoMeta(link.ID)
 			if err != nil {
-				fmt.Printf("Error downloading video metadata for %s: %v\n", link.ID, err)
+				errs = append(errs, fmt.Errorf("Error downloading video metadata for %s: %w", link.ID, err))
 				continue
 			}
 
 			// Check if video already exists
 			if s.checkVideoExists(meta) {
-				if verbose {
-					fmt.Printf("Video %s already exists, skipping\n", meta.LongTitle)
-				}
 				continue
 			}
 
 			folder, err := s.folderForVideo(meta)
 			if err != nil {
-				fmt.Printf("Error creating folder for %s: %v\n", link.ID, err)
+				errs = append(errs, fmt.Errorf("Error creating folder for %s: %w", link.ID, err))
 				continue
 			}
 			if err := os.MkdirAll(folder, 0755); err != nil {
-				fmt.Printf("Error creating folder for %s: %v\n", link.ID, err)
+				errs = append(errs, fmt.Errorf("Error creating folder for %s: %w", link.ID, err))
 				continue
 			}
 
 			err = s.SaveVideoToFile(meta, folder)
 			if err != nil {
-				fmt.Printf("Error saving video metadata for %s: %v\n", link.ID, err)
+				errs = append(errs, fmt.Errorf("Error saving video metadata for %s: %w", link.ID, err))
 				continue
 			}
 
 			err = s.DownloadSubtitles(meta, folder)
 			if err != nil {
-				fmt.Printf("Error downloading subtitles for %s: %v\n", link.ID, err)
+				errs = append(errs, fmt.Errorf("Error downloading subtitles for %s: %w", link.ID, err))
 			}
 
 			err = s.updateFolderTime(meta, folder)
 			if err != nil {
-				fmt.Printf("Error updating folder time for %s: %v\n", link.ID, err)
+				errs = append(errs, fmt.Errorf("Error updating folder time for %s: %w", link.ID, err))
 			}
 
 			fmt.Printf("Downloaded video %s\n", meta.LongTitle)
@@ -217,7 +208,7 @@ func (s *Scrapper) RunWithLimit(maxPages int, verbose bool) int {
 		}
 	}
 
-	return videosDownloaded
+	return videosDownloaded, errs
 }
 
 type VideoInfo struct {

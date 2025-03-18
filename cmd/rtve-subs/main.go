@@ -84,16 +84,21 @@ func runScraper(c *cli.Context) error {
 	}
 
 	// Create the scraper with the provided options
-	scraper := rtve.NewScrapper(
+	scrapper := rtve.NewScrapper(
 		show,
 		rtve.WithOutputPath(outputPath),
 	)
 
 	// Start scraping
 	startTime := time.Now()
-	videosDownloaded := scraper.RunWithLimit(maxPages, verbose)
+	videosDownloaded, errs := scrapper.Scrape(maxPages)
 
-	// Print summary
+	if verbose {
+		for _, err := range errs {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
+
 	duration := time.Since(startTime)
 	fmt.Printf("\nScraping completed in %s\n", duration)
 	fmt.Printf("Downloaded %d videos\n", videosDownloaded)

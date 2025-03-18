@@ -1,6 +1,6 @@
-# RTVE Video Scraper
+# RTVE Scraper
 
-A command-line tool for downloading videos and subtitles from RTVE (Radio Televisión Española).
+A command-line tool for downloading subtitles and video metadata from RTVE (Radio Televisión Española).
 
 ## Features
 
@@ -15,33 +15,24 @@ A command-line tool for downloading videos and subtitles from RTVE (Radio Televi
 
 ### Prerequisites
 
-- Go 1.16 or higher
-- Git
+- Go 1.23 or higher
 
 ### Building from source
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/rtve-go.git
-cd rtve-go
-
-# Build the application
-go build -o rtve-scraper
-
-# Optional: Move to a directory in your PATH
-sudo mv rtve-scraper /usr/local/bin/
+```
+go install github.com/rubiojr/rtve-go/cmd/rtve-subs@latest
 ```
 
 ## Usage
 
 ```bash
-./rtve-scraper fetch --show telediario-1
+rtve-subs fetch --show telediario-1
 
 # Specify output directory
-./rtve-scraper --output="/path/to/videos" --show telediario-1
+rtve-subs --output="/path/to/videos" --show telediario-1
 
 # Enable verbose output
-./rtve-scraper --verbose --show telediario-1
+rtve-subs --verbose --show telediario-1
 ```
 
 ## Supported Shows
