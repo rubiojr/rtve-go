@@ -1,6 +1,7 @@
-package main
+package rtve
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,52 +10,40 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/urfave/cli/v2"
 )
 
-type VideoInfo struct {
-	URL string
-	ID  string
-}
+// DownloadVideoMeta fetches and parses video metadata for a given video ID
+func (s *Scrapper) DownloadVideoMeta(videoID string) (*VideoMetadata, error) {
+	url := fmt.Sprintf(ApiURL, videoID)
 
-type Scrapper struct {
-	Program    string
-	client     *http.Client
-	outputPath string
-}
-
-type Option func(*Scrapper)
-
-func WithOutputPath(path string) Option {
-	return func(s *Scrapper) {
-		s.outputPath = path
-	}
-}
-
-func NewScrapper(program string, options ...Option) *Scrapper {
-	// Create a new HTTP client
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	s := &Scrapper{
-		Program:    program,
-		client:     client,
-		outputPath: "rtve-videos",
+	body, err := s.get(url)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching video metadata: %v", err)
 	}
 
-	for _, option := range options {
-		option(s)
-	}
+	m := &VideoMetadata{}
 
-	return s
+	return m, m.Parse(body)
 }
 
-var ErrPageNotFound = errors.New("page not found")
-var ErrForbidden = errors.New("access not allowed")
+func (s *Scrapper) SaveVideoToFile(meta *VideoMetadata, directory string) error {
+	jsonData, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal video metadata: %v", err)
+	}
+
+	// Create filename based on video ID
+	filename := fmt.Sprintf("%s/video_%s.json", directory, meta.ID)
+
+	// Write to file
+	if err := os.WriteFile(filename, jsonData, 0644); err != nil {
+		return fmt.Errorf("failed to write video metadata to file: %v", err)
+	}
+
+	return nil
+}
 
 func (s *Scrapper) get(url string) (string, error) {
 	// Create a new request
@@ -133,7 +122,6 @@ func (s *Scrapper) folderForVideo(meta *VideoMetadata) (string, error) {
 func (s *Scrapper) checkVideoExists(meta *VideoMetadata) bool {
 	folder, err := s.folderForVideo(meta)
 	if err != nil {
-		log.Printf("error creating folder for video: %w", err)
 		return false
 	}
 
@@ -157,96 +145,6 @@ func (s *Scrapper) updateFolderTime(meta *VideoMetadata, folder string) error {
 			}
 		}
 	}
-	return nil
-}
-
-func main() {
-	app := &cli.App{
-		Name:  "rtve-scraper",
-		Usage: "Download videos and subtitles from RTVE",
-		Commands: []*cli.Command{
-			{
-				Name:   "fetch",
-				Usage:  "Download videos from RTVE",
-				Action: runScraper,
-				Flags: []cli.Flag{
-					&cli.StringFlag{
-						Name:    "output",
-						Aliases: []string{"o"},
-						Value:   "rtve-videos",
-						Usage:   "Output directory for downloaded content",
-					},
-					&cli.StringFlag{
-						Name:     "show",
-						Aliases:  []string{"p"},
-						Required: true,
-						Usage:    "Show to scrape",
-					},
-					&cli.IntFlag{
-						Name:    "max-pages",
-						Aliases: []string{"m"},
-						Value:   1,
-						Usage:   "Maximum number of pages to scrape",
-					},
-					&cli.BoolFlag{
-						Name:    "verbose",
-						Aliases: []string{"v"},
-						Value:   false,
-						Usage:   "Enable verbose output",
-					},
-				},
-			},
-			{
-				Name:   "list-shows",
-				Usage:  "List available shows that can be downloaded",
-				Action: listShows,
-			},
-		},
-	}
-
-	err := app.Run(os.Args)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func runScraper(c *cli.Context) error {
-	outputPath := c.String("output")
-	show := c.String("show")
-	maxPages := c.Int("max-pages")
-	verbose := c.Bool("verbose")
-
-	// Create output directory if it doesn't exist
-	if err := os.MkdirAll(outputPath, 0755); err != nil {
-		return fmt.Errorf("failed to create output directory: %v", err)
-	}
-
-	fmt.Printf("Starting RTVE scraper\n")
-	fmt.Printf("Output directory: %s\n", outputPath)
-	fmt.Printf("Show: %s\n", show)
-	fmt.Printf("Max pages: %d\n", maxPages)
-
-	switch show {
-	case "telediario-1", "telediario-2", "informe-semanal":
-	default:
-		return fmt.Errorf("unsupported show: %s", show)
-	}
-
-	// Create the scraper with the provided options
-	scraper := NewScrapper(
-		show,
-		WithOutputPath(outputPath),
-	)
-
-	// Start scraping
-	startTime := time.Now()
-	videosDownloaded := scraper.RunWithLimit(maxPages, verbose)
-
-	// Print summary
-	duration := time.Since(startTime)
-	fmt.Printf("\nScraping completed in %s\n", duration)
-	fmt.Printf("Downloaded %d videos\n", videosDownloaded)
-
 	return nil
 }
 
@@ -322,23 +220,42 @@ func (s *Scrapper) RunWithLimit(maxPages int, verbose bool) int {
 	return videosDownloaded
 }
 
-func listShows(c *cli.Context) error {
-	fmt.Println("Available shows:")
-
-	// Get a sorted list of show names for consistent output
-	shows := make([]string, 0, len(urlMap))
-	for show := range urlMap {
-		shows = append(shows, show)
-	}
-	sort.Strings(shows)
-
-	// Print each show with its details
-	for _, show := range shows {
-		fmt.Printf("- %s (ID: %s)\n", show, urlMap[show].ID)
-	}
-
-	fmt.Println("\nUse the show name with the fetch command:")
-	fmt.Println("Example: rtve-scraper fetch --show telediario-1")
-
-	return nil
+type VideoInfo struct {
+	URL string
+	ID  string
 }
+
+type Scrapper struct {
+	Program    string
+	client     *http.Client
+	outputPath string
+}
+
+type Option func(*Scrapper)
+
+func WithOutputPath(path string) Option {
+	return func(s *Scrapper) {
+		s.outputPath = path
+	}
+}
+
+func NewScrapper(program string, options ...Option) *Scrapper {
+	// Create a new HTTP client
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	s := &Scrapper{
+		Program:    program,
+		client:     client,
+		outputPath: "rtve-videos",
+	}
+
+	for _, option := range options {
+		option(s)
+	}
+
+	return s
+}
+
+var ErrPageNotFound = errors.New("page not found")
+var ErrForbidden = errors.New("access not allowed")

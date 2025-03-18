@@ -1,10 +1,6 @@
-package main
+package rtve
 
-var urlMap = map[string]struct {
-	ID    string
-	URL   string
-	Regex string
-}{
+var urlMap = map[string]*Show{
 	"telediario-2": {
 		ID:    "135930",
 		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/135930/?page=%d",
@@ -24,3 +20,21 @@ var urlMap = map[string]struct {
 
 const ApiURL = "https://api2.rtve.es/api/videos/%s.json"
 const SubsURL = "https://api2.rtve.es/api/videos/%s/subtitulos.json"
+
+type Show struct {
+	ID    string
+	URL   string
+	Regex string
+}
+
+func ShowMap(name string) *Show {
+	return (urlMap[name])
+}
+
+func ListShows() []string {
+	var shows []string
+	for k, _ := range urlMap {
+		shows = append(shows, k)
+	}
+	return shows
+}
