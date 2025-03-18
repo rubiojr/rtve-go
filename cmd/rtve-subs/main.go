@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"slices"
+
 	"github.com/rubiojr/rtve-go"
 	"github.com/urfave/cli/v2"
 )
@@ -77,9 +79,8 @@ func runScraper(c *cli.Context) error {
 	fmt.Printf("Show: %s\n", show)
 	fmt.Printf("Max pages: %d\n", maxPages)
 
-	switch show {
-	case "telediario-1", "telediario-2", "informe-semanal":
-	default:
+	shows := rtve.ListShows()
+	if !slices.Contains(shows, show) {
 		return fmt.Errorf("unsupported show: %s", show)
 	}
 

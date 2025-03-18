@@ -11,6 +11,11 @@ var urlMap = map[string]*Show{
 		ID:    "45030",
 		Regex: `https://www\.rtve\.es/play/videos/telediario-1/.*/`,
 	},
+	"telediario-matinal": {
+		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/135931/?page=%d",
+		ID:    "135931",
+		Regex: `https://www\.rtve\.es/play/videos/telediario-matinal/.*/`,
+	},
 	"informe-semanal": {
 		URL:   "https://www.rtve.es/play/videos/modulos/capitulos/1631/?page=%d",
 		ID:    "1631",
