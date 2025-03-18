@@ -40,6 +40,7 @@ rtve-subs --verbose --show telediario-1
 Currently supported shows include:
 - telediario-1
 - telediario-2
+- telediario-matinal
 - informe-semanal
 
 Use the `list-shows` command to see the complete list of available shows
