@@ -45,38 +45,67 @@ func (s *Scrapper) SaveVideoToFile(meta *VideoMetadata, directory string) error 
 }
 
 func (s *Scrapper) get(url string) (string, error) {
-	// Create a new request
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("error creating request: %w", err)
+	const maxRetries = 3
+	const initialBackoff = 1 * time.Second
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Create a new request
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return "", fmt.Errorf("error creating request: %w", err)
+		}
+
+		// Set headers
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "application/json")
+
+		// Execute the request
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return "", fmt.Errorf("error executing request: %v", err)
+		}
+
+		// Check status code
+		if resp.StatusCode == 404 {
+			resp.Body.Close()
+			return "", ErrPageNotFound
+		}
+
+		if resp.StatusCode == 403 {
+			resp.Body.Close()
+			return "", ErrForbidden
+		}
+
+		// Retry on 5xx errors
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			resp.Body.Close()
+			if attempt < maxRetries {
+				backoff := initialBackoff * time.Duration(1<<uint(attempt))
+				if s.verbose {
+					fmt.Printf("Server error %d, retrying in %v (attempt %d/%d)...\n", resp.StatusCode, backoff, attempt+1, maxRetries)
+				}
+				time.Sleep(backoff)
+				continue
+			}
+			return "", fmt.Errorf("server error after %d retries: status code %d", maxRetries, resp.StatusCode)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		// Read response body
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("error reading response body: %w", err)
+		}
+
+		return string(body), nil
 	}
 
-	// Set headers
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "application/json")
-
-	// Execute the request
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("error executing request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 404 {
-		return "", ErrPageNotFound
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("error reading response body: %w", err)
-	}
-
-	return string(body), nil
+	return "", fmt.Errorf("unexpected error in retry loop")
 }
 
 func (s *Scrapper) ScrapePage(page int) ([]*VideoInfo, error) {
@@ -133,6 +162,38 @@ func (s *Scrapper) checkVideoExists(meta *VideoMetadata) bool {
 	return false
 }
 
+// checkVideoExistsByID checks if a video exists by searching for its JSON file
+// and returns the folder path if found. This is more efficient than fetching metadata first.
+func (s *Scrapper) checkVideoExistsByID(videoID string) (bool, string) {
+	var foundPath string
+
+	filepath.Walk(s.outputPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && info.Name() == fmt.Sprintf("video_%s.json", videoID) {
+			foundPath = filepath.Dir(path)
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	return foundPath != "", foundPath
+}
+
+// checkSubtitlesExist checks if subtitles directory exists for a video in the given folder
+func (s *Scrapper) checkSubtitlesExist(folder string) bool {
+	subsDir := filepath.Join(folder, "subs")
+	if _, err := os.Stat(subsDir); !os.IsNotExist(err) {
+		// Check if there's at least one subtitle file
+		entries, err := os.ReadDir(subsDir)
+		if err == nil && len(entries) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Scrapper) updateFolderTime(meta *VideoMetadata, folder string) error {
 	if meta.PublicationDate != "" {
 		layout := "02-01-2006 15:04:05"
@@ -154,7 +215,13 @@ func (s *Scrapper) Scrape(maxPages int) (int, []error) {
 	videosDownloaded := 0
 	errs := make([]error, 0)
 
-	for page := 0; page <= maxPages; page++ {
+	page := 0
+	for {
+		// Check if we've reached the max pages limit (0 means unlimited)
+		if maxPages > 0 && page > maxPages {
+			break
+		}
+
 		links, err := s.ScrapePage(page)
 		if errors.Is(err, ErrPageNotFound) || errors.Is(err, ErrForbidden) {
 			break
@@ -162,18 +229,44 @@ func (s *Scrapper) Scrape(maxPages int) (int, []error) {
 
 		if err != nil {
 			errs = append(errs, fmt.Errorf("error finding links on page %d: %w", page, err))
+			page++
 			continue
 		}
 
 		for _, link := range links {
-			meta, err := s.DownloadVideoMeta(link.ID)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("Error downloading video metadata for %s: %w", link.ID, err))
+			// Check if video already exists before fetching metadata
+			exists, existingFolder := s.checkVideoExistsByID(link.ID)
+
+			if exists {
+				// Video metadata exists, but check if subtitles are missing
+				if !s.checkSubtitlesExist(existingFolder) {
+					// Need to download subtitles - fetch metadata for that
+					meta, err := s.DownloadVideoMeta(link.ID)
+					if err != nil {
+						errs = append(errs, fmt.Errorf("Error downloading video metadata for %s: %w", link.ID, err))
+						continue
+					}
+
+					if s.verbose {
+						fmt.Printf("Video exists but subtitles missing, downloading subtitles: %s (ID: %s)\n", meta.LongTitle, link.ID)
+					}
+
+					err = s.DownloadSubtitles(meta, existingFolder)
+					if err != nil {
+						errs = append(errs, fmt.Errorf("Error downloading subtitles for %s: %w", link.ID, err))
+					}
+				} else {
+					if s.verbose {
+						fmt.Printf("Already downloaded, ignoring video: (ID: %s)\n", link.ID)
+					}
+				}
 				continue
 			}
 
-			// Check if video already exists
-			if s.checkVideoExists(meta) {
+			// Video doesn't exist, download everything
+			meta, err := s.DownloadVideoMeta(link.ID)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("Error downloading video metadata for %s: %w", link.ID, err))
 				continue
 			}
 
@@ -206,6 +299,8 @@ func (s *Scrapper) Scrape(maxPages int) (int, []error) {
 			fmt.Printf("Downloaded video %s\n", meta.LongTitle)
 			videosDownloaded++
 		}
+
+		page++
 	}
 
 	return videosDownloaded, errs
@@ -220,6 +315,7 @@ type Scrapper struct {
 	Program    string
 	client     *http.Client
 	outputPath string
+	verbose    bool
 }
 
 type Option func(*Scrapper)
@@ -227,6 +323,12 @@ type Option func(*Scrapper)
 func WithOutputPath(path string) Option {
 	return func(s *Scrapper) {
 		s.outputPath = path
+	}
+}
+
+func WithVerbose(verbose bool) Option {
+	return func(s *Scrapper) {
+		s.verbose = verbose
 	}
 }
 

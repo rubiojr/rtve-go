@@ -43,8 +43,8 @@ func main() {
 					&cli.IntFlag{
 						Name:    "max-pages",
 						Aliases: []string{"m"},
-						Value:   1,
-						Usage:   "Maximum number of pages to scrape",
+						Value:   0,
+						Usage:   "Maximum number of pages to scrape (0 = unlimited)",
 					},
 					&cli.BoolFlag{
 						Name:    "verbose",
@@ -112,7 +112,11 @@ func runScraper(c *cli.Context) error {
 	fmt.Printf("Starting RTVE scraper\n")
 	fmt.Printf("Output directory: %s\n", outputPath)
 	fmt.Printf("Show: %s\n", show)
-	fmt.Printf("Max pages: %d\n", maxPages)
+	if maxPages == 0 {
+		fmt.Printf("Max pages: unlimited\n")
+	} else {
+		fmt.Printf("Max pages: %d\n", maxPages)
+	}
 
 	shows := rtve.ListShows()
 	if !slices.Contains(shows, show) {
@@ -123,6 +127,7 @@ func runScraper(c *cli.Context) error {
 	scrapper := rtve.NewScrapper(
 		show,
 		rtve.WithOutputPath(outputPath),
+		rtve.WithVerbose(verbose),
 	)
 
 	// Start scraping

@@ -42,12 +42,13 @@ go build -o rtve-subs cmd/rtve-subs/main.go
 #### Fetch videos from a specific show
 
 ```bash
+# Fetch all historical videos from a show (default behavior)
 rtve-subs fetch --show telediario-1
 
 # Specify output directory
 rtve-subs fetch --output="/path/to/videos" --show telediario-1
 
-# Fetch multiple pages
+# Fetch only the first 5 pages
 rtve-subs fetch --show telediario-1 --max-pages 5
 
 # Enable verbose output
@@ -137,7 +138,7 @@ Use the `list-shows` command to see the complete list of available shows.
 |--------|-------|---------|-------------|
 | `--output` | `-o` | `rtve-videos` | Output directory for downloaded content |
 | `--show` | `-s` | (required) | Show to scrape |
-| `--max-pages` | `-m` | `1` | Maximum number of pages to scrape |
+| `--max-pages` | `-m` | `0` | Maximum number of pages to scrape (0 = unlimited, fetches all historical shows) |
 | `--verbose` | `-v` | `false` | Enable verbose output |
 
 #### `fetch-latest` command

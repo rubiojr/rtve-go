@@ -76,6 +76,59 @@ func (s *Scrapper) fetchSubtitlesResponse(id string) (*SubtitleResponse, error) 
 	return &subtitleResp, nil
 }
 
+// downloadWithRetry downloads a file with retry logic for 5xx errors
+func (s *Scrapper) downloadWithRetry(url string, maxRetries int) ([]byte, error) {
+	const initialBackoff = 1 * time.Second
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("error creating request: %w", err)
+		}
+
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("error executing request: %v", err)
+		}
+
+		// Retry on 5xx errors
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			resp.Body.Close()
+			if attempt < maxRetries {
+				backoff := initialBackoff * time.Duration(1<<uint(attempt))
+				if s.verbose {
+					fmt.Printf("Server error %d downloading subtitle, retrying in %v (attempt %d/%d)...\n", resp.StatusCode, backoff, attempt+1, maxRetries)
+				}
+				time.Sleep(backoff)
+				continue
+			}
+			return nil, fmt.Errorf("server error after %d retries: status code %d", maxRetries, resp.StatusCode)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		// Read response body
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("error reading response body: %w", err)
+		}
+
+		return body, nil
+	}
+
+	return nil, fmt.Errorf("unexpected error in retry loop")
+}
+
 // DownloadSubtitles downloads all available subtitles for a given video ID and saves them to the specified directory
 func (s *Scrapper) DownloadSubtitles(meta *VideoMetadata, outputDir string) error {
 	outputDir = filepath.Join(outputDir, "subs")
@@ -96,51 +149,20 @@ func (s *Scrapper) DownloadSubtitles(meta *VideoMetadata, outputDir string) erro
 		return fmt.Errorf("no subtitles found for video ID: %s", meta.ID)
 	}
 
-	// Create HTTP client for downloading
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-	}
-
 	for _, item := range subtitles.Page.Items {
 		// Create a filename based on video ID and language
 		filename := fmt.Sprintf("%s_%s.vtt", meta.ID, item.Lang)
 		outputPath := filepath.Join(outputDir, filename)
 
-		// Download the subtitle file
-		req, err := http.NewRequest("GET", item.Src, nil)
-		if err != nil {
-			fmt.Printf("Error creating request for %s: %v\n", item.Lang, err)
-			continue
-		}
-
-		req.Header.Set("User-Agent", "Mozilla/5.0")
-
-		resp, err := client.Do(req)
+		// Download the subtitle file with retries
+		content, err := s.downloadWithRetry(item.Src, 3)
 		if err != nil {
 			fmt.Printf("Error downloading subtitle for %s: %v\n", item.Lang, err)
 			continue
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			fmt.Printf("Error: received status code %d for %s\n", resp.StatusCode, item.Lang)
-			continue
-		}
-
-		// Create output file
-		out, err := os.Create(outputPath)
-		if err != nil {
-			resp.Body.Close()
-			fmt.Printf("Error creating output file for %s: %v\n", item.Lang, err)
-			continue
-		}
-
-		// Copy data to file
-		_, err = io.Copy(out, resp.Body)
-		resp.Body.Close()
-		out.Close()
-
-		if err != nil {
+		// Write to file
+		if err := os.WriteFile(outputPath, content, 0644); err != nil {
 			fmt.Printf("Error writing subtitle for %s: %v\n", item.Lang, err)
 			continue
 		}
