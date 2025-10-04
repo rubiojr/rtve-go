@@ -1,5 +1,7 @@
 # RTVE Scraper
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/rubiojr/rtve-go.svg)](https://pkg.go.dev/github.com/rubiojr/rtve-go)
+
 A Go library and command-line tool for downloading subtitles and video metadata from RTVE (Radio Televisión Española).
 
 ## Features
