@@ -357,11 +357,12 @@ func FetchShowAll(showID string, visitor VisitorFunc) (*FetchStats, error) {
 func FetchShowLatest(showID string, maxVideos int, visitor VisitorFunc) (*FetchStats, error) {
 	count := 0
 	wrappedVisitor := func(result *VideoResult) error {
-		count++
-		if maxVideos > 0 && count > maxVideos {
+		// Check limit before processing
+		if maxVideos > 0 && count >= maxVideos {
 			// Stop processing by returning a sentinel error
 			return ErrMaxVideosReached
 		}
+		count++
 		return visitor(result)
 	}
 

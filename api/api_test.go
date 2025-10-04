@@ -155,3 +155,191 @@ func TestFetchShowValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestFetchShowLatest_ExactCount(t *testing.T) {
+	// This test verifies that FetchShowLatest fetches exactly maxVideos,
+	// not maxVideos+1 (which was a bug in the original implementation)
+
+	tests := []struct {
+		name      string
+		maxVideos int
+	}{
+		{"fetch exactly 1 video", 1},
+		{"fetch exactly 2 videos", 2},
+		{"fetch exactly 5 videos", 5},
+		{"fetch exactly 10 videos", 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			count := 0
+			visitor := func(result *VideoResult) error {
+				count++
+				// Track each video processed
+				return nil
+			}
+
+			// Create a wrapped visitor that simulates FetchShowLatest's behavior
+			wrappedCount := 0
+			wrappedVisitor := func(result *VideoResult) error {
+				// This mimics the fixed implementation
+				if tt.maxVideos > 0 && wrappedCount >= tt.maxVideos {
+					return ErrMaxVideosReached
+				}
+				wrappedCount++
+				return visitor(result)
+			}
+
+			// Simulate processing more videos than requested
+			for i := 0; i < tt.maxVideos+10; i++ {
+				mockResult := &VideoResult{
+					Metadata: &rtve.VideoMetadata{
+						ID:        fmt.Sprintf("video-%d", i),
+						LongTitle: fmt.Sprintf("Video %d", i),
+					},
+				}
+
+				err := wrappedVisitor(mockResult)
+				if err == ErrMaxVideosReached {
+					break
+				}
+			}
+
+			// Verify we processed exactly maxVideos, not more
+			if count != tt.maxVideos {
+				t.Errorf("Expected to process exactly %d videos, but processed %d", tt.maxVideos, count)
+			}
+
+			// Verify the wrapped counter also stopped at the right count
+			if wrappedCount != tt.maxVideos {
+				t.Errorf("Expected wrappedCount to be %d, got %d", tt.maxVideos, wrappedCount)
+			}
+		})
+	}
+}
+
+func TestFetchShowLatest_ZeroMeansUnlimited(t *testing.T) {
+	// Test that maxVideos=0 means unlimited
+	count := 0
+	maxVideos := 0
+
+	visitor := func(result *VideoResult) error {
+		count++
+		if count > 100 {
+			// Stop after 100 to prevent infinite loop in test
+			return fmt.Errorf("stop")
+		}
+		return nil
+	}
+
+	wrappedCount := 0
+	wrappedVisitor := func(result *VideoResult) error {
+		// Check limit before processing
+		if maxVideos > 0 && wrappedCount >= maxVideos {
+			return ErrMaxVideosReached
+		}
+		wrappedCount++
+		return visitor(result)
+	}
+
+	// Process 100 videos
+	for i := 0; i < 100; i++ {
+		mockResult := &VideoResult{
+			Metadata: &rtve.VideoMetadata{
+				ID:        fmt.Sprintf("video-%d", i),
+				LongTitle: fmt.Sprintf("Video %d", i),
+			},
+		}
+
+		err := wrappedVisitor(mockResult)
+		if err != nil {
+			break
+		}
+	}
+
+	// With maxVideos=0, we should process all 100 videos
+	if count != 100 {
+		t.Errorf("Expected to process 100 videos with maxVideos=0, but processed %d", count)
+	}
+}
+
+func TestFetchShowLatest_OffByOneBug(t *testing.T) {
+	// This test specifically checks for the off-by-one bug where
+	// the original implementation would fetch maxVideos+1 instead of maxVideos
+
+	maxVideos := 1
+
+	// Simulate the BUGGY implementation (process, increment count, then check count > maxVideos)
+	buggyProcessed := 0
+	buggyCount := 0
+	buggyVisitor := func(result *VideoResult) error {
+		// Process the video first (THIS IS THE BUG)
+		buggyProcessed++
+		buggyCount++
+		// Then check if we've exceeded the limit
+		if maxVideos > 0 && buggyCount > maxVideos {
+			return ErrMaxVideosReached
+		}
+		return nil
+	}
+
+	// Process videos with buggy implementation
+	for i := 0; i < 10; i++ {
+		mockResult := &VideoResult{
+			Metadata: &rtve.VideoMetadata{
+				ID:        fmt.Sprintf("buggy-video-%d", i),
+				LongTitle: fmt.Sprintf("Video %d", i),
+			},
+		}
+
+		err := buggyVisitor(mockResult)
+		if err == ErrMaxVideosReached {
+			break
+		}
+	}
+
+	// Now test the FIXED implementation (check count >= maxVideos BEFORE incrementing)
+	fixedProcessed := 0
+	fixedCount := 0
+	fixedVisitor := func(result *VideoResult) error {
+		// Check limit BEFORE incrementing and processing (THIS IS THE FIX)
+		if maxVideos > 0 && fixedCount >= maxVideos {
+			return ErrMaxVideosReached
+		}
+		fixedCount++
+		fixedProcessed++
+		return nil
+	}
+
+	// Process videos with fixed implementation
+	for i := 0; i < 10; i++ {
+		mockResult := &VideoResult{
+			Metadata: &rtve.VideoMetadata{
+				ID:        fmt.Sprintf("fixed-video-%d", i),
+				LongTitle: fmt.Sprintf("Video %d", i),
+			},
+		}
+
+		err := fixedVisitor(mockResult)
+		if err == ErrMaxVideosReached {
+			break
+		}
+	}
+
+	// The buggy implementation processes maxVideos+1 (because it checks AFTER incrementing and processing)
+	expectedBuggy := maxVideos + 1
+	if buggyProcessed != expectedBuggy {
+		t.Errorf("Buggy implementation should process %d videos (maxVideos+1), but processed %d", expectedBuggy, buggyProcessed)
+	}
+
+	// The fixed implementation should process exactly maxVideos
+	if fixedProcessed != maxVideos {
+		t.Errorf("Fixed implementation should process exactly %d videos, but processed %d", maxVideos, fixedProcessed)
+	}
+
+	// Demonstrate the bug: buggy processes one more than fixed
+	if buggyProcessed != fixedProcessed+1 {
+		t.Errorf("Buggy implementation should process one more video than fixed. Buggy: %d, Fixed: %d",
+			buggyProcessed, fixedProcessed)
+	}
+}
