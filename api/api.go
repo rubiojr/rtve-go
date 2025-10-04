@@ -37,6 +37,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	rtve "github.com/rubiojr/rtve-go"
@@ -355,28 +356,123 @@ func FetchShowAll(showID string, visitor VisitorFunc) (*FetchStats, error) {
 //		return nil
 //	})
 func FetchShowLatest(showID string, maxVideos int, visitor VisitorFunc) (*FetchStats, error) {
-	count := 0
-	wrappedVisitor := func(result *VideoResult) error {
-		// Check limit before processing
-		if maxVideos > 0 && count >= maxVideos {
-			// Stop processing by returning a sentinel error
-			return ErrMaxVideosReached
+	// Validate show ID
+	availableShows := rtve.ListShows()
+	validShow := false
+	for _, show := range availableShows {
+		if show == showID {
+			validShow = true
+			break
 		}
+	}
+	if !validShow {
+		return nil, fmt.Errorf("invalid show ID: %s (use rtve.ListShows() to see available shows)", showID)
+	}
+
+	stats := &FetchStats{
+		Errors: make([]error, 0),
+	}
+
+	scraper := rtve.NewScrapper(showID)
+	const rtveLayout = "02-01-2006 15:04:05"
+
+	// Collect all videos from the first page(s) to ensure we get the most recent ones
+	// RTVE doesn't return videos in chronological order, so we need to sort them
+	type videoWithDate struct {
+		result  *VideoResult
+		pubDate time.Time
+	}
+
+	var videosWithDates []videoWithDate
+	seenVideoIDs := make(map[string]bool) // Track duplicate video IDs
+	maxPagesToScan := 3                   // Scan first 3 pages to ensure we get recent videos
+
+	for page := 0; page < maxPagesToScan; page++ {
+		videos, err := scraper.ScrapePage(page)
+		if err != nil {
+			// If we've found at least one video and now hit an error, stop scanning
+			if len(videosWithDates) > 0 && (err == rtve.ErrPageNotFound || err == rtve.ErrForbidden) {
+				break
+			}
+			// Otherwise, it's a real error
+			if err == rtve.ErrPageNotFound || err == rtve.ErrForbidden {
+				// No videos found at all
+				break
+			}
+			return stats, fmt.Errorf("error scraping page %d: %w", page, err)
+		}
+
+		stats.PagesScraped++
+
+		if len(videos) == 0 {
+			break
+		}
+
+		for _, videoInfo := range videos {
+			// Skip duplicate video IDs
+			if seenVideoIDs[videoInfo.ID] {
+				continue
+			}
+			seenVideoIDs[videoInfo.ID] = true
+
+			// Fetch metadata
+			metadata, err := scraper.DownloadVideoMeta(videoInfo.ID)
+			if err != nil {
+				stats.ErrorCount++
+				stats.Errors = append(stats.Errors, fmt.Errorf("error fetching metadata for video %s: %w", videoInfo.ID, err))
+				continue
+			}
+
+			// Parse publication date
+			pubDate, err := time.Parse(rtveLayout, metadata.PublicationDate)
+			if err != nil {
+				stats.ErrorCount++
+				stats.Errors = append(stats.Errors, fmt.Errorf("error parsing date for video %s: %w", videoInfo.ID, err))
+				continue
+			}
+
+			// Fetch subtitles
+			result := &VideoResult{
+				Metadata: metadata,
+			}
+
+			subtitles, err := scraper.FetchSubtitles(metadata)
+			if err != nil {
+				result.SubtitlesError = err
+				stats.ErrorCount++
+				stats.Errors = append(stats.Errors, fmt.Errorf("error fetching subtitles for video %s: %w", videoInfo.ID, err))
+			} else {
+				result.Subtitles = subtitles
+			}
+
+			videosWithDates = append(videosWithDates, videoWithDate{
+				result:  result,
+				pubDate: pubDate,
+			})
+		}
+	}
+
+	// Sort videos by publication date, most recent first
+	sort.Slice(videosWithDates, func(i, j int) bool {
+		return videosWithDates[i].pubDate.After(videosWithDates[j].pubDate)
+	})
+
+	// Process the most recent videos up to maxVideos
+	count := 0
+	for _, vwd := range videosWithDates {
+		if maxVideos > 0 && count >= maxVideos {
+			break
+		}
+
+		if err := visitor(vwd.result); err != nil {
+			return stats, fmt.Errorf("visitor function returned error for video %s: %w", vwd.result.Metadata.ID, err)
+		}
+
+		stats.VideosProcessed++
 		count++
-		return visitor(result)
 	}
 
-	start := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Now().Add(24 * time.Hour)
-
-	stats, err := FetchShow(showID, start, end, wrappedVisitor)
-
-	// If we stopped because we reached max videos, that's not an error
-	if err != nil && errors.Is(err, ErrMaxVideosReached) {
-		return stats, nil
-	}
-
-	return stats, err
+	return stats, nil
 }
 
 // AvailableShows returns a list of all available show IDs that can be used

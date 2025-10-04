@@ -330,3 +330,87 @@ func TestIntegrationFetchLatestAllShows(t *testing.T) {
 		})
 	}
 }
+
+func TestIntegrationFetchLatestChronologicalOrder(t *testing.T) {
+	// Test that FetchShowLatest returns videos in chronological order (most recent first)
+	// This is a regression test for the bug where videos were returned in webpage order
+	// rather than chronological order
+	const rtveLayout = "02-01-2006 15:04:05"
+
+	tests := []struct {
+		name      string
+		showID    string
+		maxVideos int
+	}{
+		{
+			name:      "informe-semanal 3 videos",
+			showID:    "informe-semanal",
+			maxVideos: 3,
+		},
+		{
+			name:      "telediario-1 5 videos",
+			showID:    "telediario-1",
+			maxVideos: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var pubDates []time.Time
+
+			visitor := func(result *VideoResult) error {
+				if result.Metadata == nil {
+					t.Error("Metadata should not be nil")
+					return nil
+				}
+
+				// Parse publication date
+				pubDate, err := time.Parse(rtveLayout, result.Metadata.PublicationDate)
+				if err != nil {
+					t.Errorf("Failed to parse publication date %s: %v", result.Metadata.PublicationDate, err)
+					return nil
+				}
+
+				pubDates = append(pubDates, pubDate)
+				t.Logf("Video %d: %s (published: %s)", len(pubDates), result.Metadata.LongTitle, pubDate.Format("2006-01-02"))
+
+				return nil
+			}
+
+			stats, err := FetchShowLatest(tt.showID, tt.maxVideos, visitor)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if stats == nil {
+				t.Fatal("Stats should not be nil")
+			}
+
+			// Verify we got some videos
+			if len(pubDates) == 0 {
+				t.Fatal("Should have found at least one video")
+			}
+
+			// Verify videos are in chronological order (most recent first)
+			for i := 0; i < len(pubDates)-1; i++ {
+				if pubDates[i].Before(pubDates[i+1]) {
+					t.Errorf("Videos not in chronological order: video %d (%s) is before video %d (%s)",
+						i, pubDates[i].Format("2006-01-02 15:04:05"),
+						i+1, pubDates[i+1].Format("2006-01-02 15:04:05"))
+				}
+			}
+
+			// Verify the first video is the most recent
+			mostRecent := pubDates[0]
+			for i, pubDate := range pubDates {
+				if pubDate.After(mostRecent) {
+					t.Errorf("First video is not the most recent: video %d (%s) is more recent than video 0 (%s)",
+						i, pubDate.Format("2006-01-02 15:04:05"),
+						mostRecent.Format("2006-01-02 15:04:05"))
+				}
+			}
+
+			t.Logf("Successfully verified %d videos in chronological order", len(pubDates))
+		})
+	}
+}
