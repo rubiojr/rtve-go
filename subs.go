@@ -32,7 +32,35 @@ type SubtitleResponse struct {
 	Page SubtitlePage `json:"page"` // Subtitle page information
 }
 
-func (s *Scrapper) FetchSubtitles(id string) (*SubtitleResponse, error) {
+// Subtitles represents parsed subtitle data for a video
+type Subtitles struct {
+	// VideoID is the ID of the video these subtitles belong to
+	VideoID string
+	// Subtitles is a list of available subtitle tracks
+	Subtitles []SubtitleItem
+}
+
+// FetchSubtitles fetches subtitle metadata for a video and returns a Subtitles object
+func (s *Scrapper) FetchSubtitles(meta *VideoMetadata) (*Subtitles, error) {
+	url := fmt.Sprintf(SubsURL, meta.ID)
+
+	body, err := s.get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	var subtitleResp SubtitleResponse
+	if err := json.Unmarshal([]byte(body), &subtitleResp); err != nil {
+		return nil, err
+	}
+
+	return &Subtitles{
+		VideoID:   meta.ID,
+		Subtitles: subtitleResp.Page.Items,
+	}, nil
+}
+
+func (s *Scrapper) fetchSubtitlesResponse(id string) (*SubtitleResponse, error) {
 	url := fmt.Sprintf(SubsURL, id)
 
 	body, err := s.get(url)
@@ -58,7 +86,7 @@ func (s *Scrapper) DownloadSubtitles(meta *VideoMetadata, outputDir string) erro
 	}
 
 	// Fetch subtitle information
-	subtitles, err := s.FetchSubtitles(meta.ID)
+	subtitles, err := s.fetchSubtitlesResponse(meta.ID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch subtitles: %v", err)
 	}
